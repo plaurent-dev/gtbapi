@@ -1,0 +1,27 @@
+{
+  "name": "gtbapi",
+  "version": "1.0.0",
+  "description": "Modbus TCP API for Waveshare RS485 to POE ETH(B) and POLIER meter",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:restart": "pm2 restart gtb-api",
+    "pm2:logs": "pm2 logs gtb-api",
+    "pm2:stop": "pm2 stop gtb-api && pm2 delete gtb-api"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^18.0.1",
+    "express": "^5.2.1",
+    "modbus-serial": "^8.0.25",
+    "mqtt": "^5.16.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "zod": "^4.6.5"
+  }
+}
