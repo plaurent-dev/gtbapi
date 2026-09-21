@@ -3,7 +3,13 @@ const { z } = require("zod");
 const pinoHttp = require("pino-http");
 const config = require("./config");
 const logger = require("./logger");
-const { readMeter, discoverUnitIds, readRawRegisters } = require("./modbus");
+const {
+  readMeter,
+  discoverUnitIds,
+  readRawRegisters,
+  readDeviceProfile,
+  PROFILE_DEFINITIONS
+} = require("./modbus");
 const { discoverMeters } = require("./discovery");
 const { publishMeasurements } = require("./publisher");
 
@@ -188,6 +194,55 @@ app.get("/api/v1/meter/read-raw", async (req, res, next) => {
       target: { host, port: port ?? config.MODBUS_PORT, unitId },
       request: { type, address, count },
       data
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.get("/api/v1/meter/profiles", (_req, res) => {
+  const profiles = Object.entries(PROFILE_DEFINITIONS).map(([name, def]) => ({
+    name,
+    defaultUnitId: def.defaultUnitId,
+    fields: def.fields.map((field) => ({
+      name: field.name,
+      type: field.type,
+      address: field.address,
+      count: field.count,
+      decode: field.decode
+    }))
+  }));
+
+  res.json({ count: profiles.length, profiles });
+});
+
+const readProfileQuerySchema = z.object({
+  host: z.string().min(1),
+  profile: z.enum(Object.keys(PROFILE_DEFINITIONS)),
+  unitId: z.coerce.number().int().min(1).max(247).optional(),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+  timeoutMs: z.coerce.number().int().min(100).max(15000).optional()
+});
+
+app.get("/api/v1/meter/read-profile", async (req, res, next) => {
+  try {
+    const parsed = readProfileQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid query", details: zodIssues(parsed.error) });
+    }
+
+    const { host, profile, unitId, port, timeoutMs } = parsed.data;
+    const result = await readDeviceProfile({ host, profile, unitId, port, timeoutMs });
+
+    return res.json({
+      target: {
+        host,
+        port: port ?? config.MODBUS_PORT,
+        unitId: result.unitId
+      },
+      profile: result.profile,
+      timestamp: new Date().toISOString(),
+      data: result.data
     });
   } catch (err) {
     return next(err);

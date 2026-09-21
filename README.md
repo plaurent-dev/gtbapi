@@ -75,6 +75,26 @@ Exemple holding register:
 curl "http://localhost:3000/api/v1/meter/read-raw?host=192.168.1.19&unitId=91&type=holding&address=0&count=1"
 ```
 
+## 5d) Lire via un profil de device (valeurs traduites)
+
+Lister les profils disponibles:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/profiles"
+```
+
+Lire un Eastron SDM120CT avec decoding metier:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/read-profile?host=192.168.1.20&profile=eastron-sdm120ct&unitId=1"
+```
+
+Lire un POLIER MM80LMZMOD:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/read-profile?host=192.168.1.19&profile=polier-mm80lmzmod&unitId=91"
+```
+
 ## 6) PM2
 
 ```bash
@@ -95,6 +115,8 @@ npm run pm2:stop
 - `GET /api/v1/meter/discover-unitid`
 - `GET /api/v1/meter/read`
 - `GET /api/v1/meter/read-raw`
+- `GET /api/v1/meter/profiles`
+- `GET /api/v1/meter/read-profile`
 
 Option de publication MQTT/GELF a la demande:
 - `GET /api/v1/meter/read?host=...&publish=true`

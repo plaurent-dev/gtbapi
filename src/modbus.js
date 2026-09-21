@@ -10,6 +10,33 @@ const REGISTER_DEFINITION = [
   { address: 0x3f, name: "year", count: 1 }
 ];
 
+const PROFILE_DEFINITIONS = {
+  "polier-mm80lmzmod": {
+    defaultUnitId: 91,
+    fields: [
+      { name: "serial_number", type: "holding", address: 0x00, count: 1, decode: "uint16" },
+      { name: "intensity", type: "holding", address: 0x16, count: 2, decode: "float32be" },
+      { name: "seconds_minutes", type: "holding", address: 0x3c, count: 1, decode: "seconds_minutes_bcd" },
+      { name: "days_weeks", type: "holding", address: 0x3d, count: 1, decode: "day_month_bcd" },
+      { name: "date_month", type: "holding", address: 0x3e, count: 1, decode: "day_month_bcd" },
+      { name: "year", type: "holding", address: 0x3f, count: 1, decode: "year_bcd" }
+    ]
+  },
+  "eastron-sdm120ct": {
+    defaultUnitId: 1,
+    fields: [
+      { name: "voltage_v", type: "input", address: 0x0000, count: 2, decode: "float32be" },
+      { name: "current_a", type: "input", address: 0x0006, count: 2, decode: "float32be" },
+      { name: "active_power_w", type: "input", address: 0x000c, count: 2, decode: "float32be" },
+      { name: "power_factor", type: "input", address: 0x001e, count: 2, decode: "float32be" },
+      { name: "frequency_hz", type: "input", address: 0x0046, count: 2, decode: "float32be" },
+      { name: "import_energy_kwh", type: "input", address: 0x0048, count: 2, decode: "float32be" },
+      { name: "export_energy_kwh", type: "input", address: 0x004a, count: 2, decode: "float32be" },
+      { name: "total_energy_kwh", type: "input", address: 0x0156, count: 2, decode: "float32be" }
+    ]
+  }
+};
+
 function decodeBcdByte(byte) {
   const tens = (byte >> 4) & 0x0f;
   const ones = byte & 0x0f;
@@ -67,6 +94,30 @@ function decodeRegisterValue(definition, registers) {
   }
 
   return raw;
+}
+
+function decodeByType(decode, registers) {
+  if (decode === "uint16") {
+    return registers[0];
+  }
+
+  if (decode === "float32be") {
+    return decodeFloat32BE(registers[0], registers[1]);
+  }
+
+  if (decode === "seconds_minutes_bcd") {
+    return decodeSecondsMinutes(registers[0]);
+  }
+
+  if (decode === "day_month_bcd") {
+    return decodeDayMonth(registers[0]);
+  }
+
+  if (decode === "year_bcd") {
+    return decodeYear(registers[0]);
+  }
+
+  throw new Error(`Unsupported decode type: ${decode}`);
 }
 
 async function withClient(host, port, unitId, timeoutMs, fn) {
@@ -208,10 +259,54 @@ async function readRawRegisters({
   });
 }
 
+async function readDeviceProfile({
+  host,
+  profile,
+  port = config.MODBUS_PORT,
+  unitId,
+  timeoutMs = config.MODBUS_TIMEOUT_MS
+}) {
+  if (!host) {
+    throw new Error("Modbus host is required");
+  }
+
+  const profileDef = PROFILE_DEFINITIONS[profile];
+  if (!profileDef) {
+    throw new Error(`Unknown profile: ${profile}`);
+  }
+
+  const resolvedUnitId = unitId ?? profileDef.defaultUnitId;
+
+  return withClient(host, port, resolvedUnitId, timeoutMs, async (client) => {
+    const output = {};
+
+    for (const field of profileDef.fields) {
+      let readResult;
+      if (field.type === "holding") {
+        readResult = await client.readHoldingRegisters(field.address, field.count);
+      } else if (field.type === "input") {
+        readResult = await client.readInputRegisters(field.address, field.count);
+      } else {
+        throw new Error(`Unsupported field type: ${field.type}`);
+      }
+
+      output[field.name] = decodeByType(field.decode, readResult.data);
+    }
+
+    return {
+      profile,
+      unitId: resolvedUnitId,
+      data: output
+    };
+  });
+}
+
 module.exports = {
   REGISTER_DEFINITION,
+  PROFILE_DEFINITIONS,
   readMeter,
   probeMeter,
   discoverUnitIds,
-  readRawRegisters
+  readRawRegisters,
+  readDeviceProfile
 };
