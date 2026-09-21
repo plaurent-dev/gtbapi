@@ -61,6 +61,20 @@ Limiter la plage et ajuster le timeout:
 curl "http://localhost:3000/api/v1/meter/discover-unitid?host=192.168.1.20&fromUnitId=1&toUnitId=30&timeoutMs=400&probe=both"
 ```
 
+## 5c) Lire un registre brut avec host + unitId
+
+Pratique pour valider rapidement un compteur (ex: Eastron, unitId=1) sans mapping metier:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/read-raw?host=192.168.1.20&unitId=1&type=input&address=0&count=2"
+```
+
+Exemple holding register:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/read-raw?host=192.168.1.19&unitId=91&type=holding&address=0&count=1"
+```
+
 ## 6) PM2
 
 ```bash
@@ -80,6 +94,7 @@ npm run pm2:stop
 - `GET /api/v1/meter/discover`
 - `GET /api/v1/meter/discover-unitid`
 - `GET /api/v1/meter/read`
+- `GET /api/v1/meter/read-raw`
 
 Option de publication MQTT/GELF a la demande:
 - `GET /api/v1/meter/read?host=...&publish=true`

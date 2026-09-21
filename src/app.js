@@ -3,7 +3,7 @@ const { z } = require("zod");
 const pinoHttp = require("pino-http");
 const config = require("./config");
 const logger = require("./logger");
-const { readMeter, discoverUnitIds } = require("./modbus");
+const { readMeter, discoverUnitIds, readRawRegisters } = require("./modbus");
 const { discoverMeters } = require("./discovery");
 const { publishMeasurements } = require("./publisher");
 
@@ -150,6 +150,44 @@ app.get("/api/v1/meter/discover-unitid", async (req, res, next) => {
       probe: probe ?? "both",
       count: result.length,
       result
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+const readRawQuerySchema = z.object({
+  host: z.string().min(1),
+  unitId: z.coerce.number().int().min(1).max(247),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+  type: z.enum(["holding", "input"]).default("input"),
+  address: z.coerce.number().int().min(0).max(65535).default(0),
+  count: z.coerce.number().int().min(1).max(125).default(2),
+  timeoutMs: z.coerce.number().int().min(100).max(10000).optional()
+});
+
+app.get("/api/v1/meter/read-raw", async (req, res, next) => {
+  try {
+    const parsed = readRawQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid query", details: zodIssues(parsed.error) });
+    }
+
+    const { host, unitId, port, type, address, count, timeoutMs } = parsed.data;
+    const data = await readRawRegisters({
+      host,
+      unitId,
+      port,
+      type,
+      address,
+      count,
+      timeoutMs
+    });
+
+    return res.json({
+      target: { host, port: port ?? config.MODBUS_PORT, unitId },
+      request: { type, address, count },
+      data
     });
   } catch (err) {
     return next(err);

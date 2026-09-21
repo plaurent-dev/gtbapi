@@ -176,9 +176,42 @@ async function discoverUnitIds({
   }
 }
 
+async function readRawRegisters({
+  host,
+  port = config.MODBUS_PORT,
+  unitId,
+  type = "holding",
+  address = 0,
+  count = 1,
+  timeoutMs = config.MODBUS_TIMEOUT_MS
+}) {
+  if (!host) {
+    throw new Error("Modbus host is required");
+  }
+
+  if (!unitId) {
+    throw new Error("Modbus unitId is required");
+  }
+
+  return withClient(host, port, unitId, timeoutMs, async (client) => {
+    if (type === "holding") {
+      const data = await client.readHoldingRegisters(address, count);
+      return data.data;
+    }
+
+    if (type === "input") {
+      const data = await client.readInputRegisters(address, count);
+      return data.data;
+    }
+
+    throw new Error("Unsupported register type. Use 'holding' or 'input'.");
+  });
+}
+
 module.exports = {
   REGISTER_DEFINITION,
   readMeter,
   probeMeter,
-  discoverUnitIds
+  discoverUnitIds,
+  readRawRegisters
 };
