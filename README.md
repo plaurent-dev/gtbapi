@@ -47,6 +47,20 @@ Le resultat renvoie les hotes joignables et, si verification activee, le `serial
 curl "http://localhost:3000/api/v1/meter/read?host=192.168.1.50"
 ```
 
+## 5b) Trouver les Unit ID sur une IP cible
+
+Scanner les adresses esclaves Modbus (1 a 247 par defaut) pour une IP donnee:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/discover-unitid?host=192.168.1.20"
+```
+
+Limiter la plage et ajuster le timeout:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/discover-unitid?host=192.168.1.20&fromUnitId=1&toUnitId=30&timeoutMs=400&probe=both"
+```
+
 ## 6) PM2
 
 ```bash
@@ -64,6 +78,7 @@ npm run pm2:stop
 
 - `GET /health`
 - `GET /api/v1/meter/discover`
+- `GET /api/v1/meter/discover-unitid`
 - `GET /api/v1/meter/read`
 
 Option de publication MQTT/GELF a la demande:

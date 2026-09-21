@@ -110,8 +110,75 @@ async function probeMeter({ host, port = config.MODBUS_PORT, unitId = config.MOD
   });
 }
 
+async function discoverUnitIds({
+  host,
+  port = config.MODBUS_PORT,
+  fromUnitId = 1,
+  toUnitId = 247,
+  timeoutMs = 400,
+  probe = "both"
+}) {
+  if (!host) {
+    throw new Error("Modbus host is required");
+  }
+
+  if (fromUnitId > toUnitId) {
+    throw new Error("Invalid unit ID range: fromUnitId must be <= toUnitId");
+  }
+
+  const client = new ModbusRTU();
+  const found = [];
+
+  try {
+    await client.connectTCP(host, { port });
+    client.setTimeout(timeoutMs);
+
+    for (let unitId = fromUnitId; unitId <= toUnitId; unitId += 1) {
+      client.setID(unitId);
+
+      if (probe === "holding" || probe === "both") {
+        try {
+          const data = await client.readHoldingRegisters(0x00, 1);
+          found.push({
+            unitId,
+            method: "holding",
+            address: 0,
+            value: data.data
+          });
+          continue;
+        } catch (_err) {
+          // Try next probe type.
+        }
+      }
+
+      if (probe === "input" || probe === "both") {
+        try {
+          const data = await client.readInputRegisters(0x00, 2);
+          found.push({
+            unitId,
+            method: "input",
+            address: 0,
+            value: data.data
+          });
+        } catch (_err) {
+          // No response for this unit ID.
+        }
+      }
+    }
+
+    return found;
+  } finally {
+    try {
+      client.close();
+    } catch (_err) {
+      // Ignore close errors.
+    }
+  }
+}
+
 module.exports = {
   REGISTER_DEFINITION,
   readMeter,
-  probeMeter
+  probeMeter,
+  discoverUnitIds
 };

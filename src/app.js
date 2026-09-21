@@ -3,11 +3,19 @@ const { z } = require("zod");
 const pinoHttp = require("pino-http");
 const config = require("./config");
 const logger = require("./logger");
-const { readMeter } = require("./modbus");
+const { readMeter, discoverUnitIds } = require("./modbus");
 const { discoverMeters } = require("./discovery");
 const { publishMeasurements } = require("./publisher");
 
 const app = express();
+app.disable("x-powered-by");
+
+function zodIssues(error) {
+  return error.issues.map((issue) => ({
+    path: issue.path.join("."),
+    message: issue.message
+  }));
+}
 
 app.use(express.json({ limit: "100kb" }));
 app.use(
@@ -41,7 +49,7 @@ app.get("/api/v1/meter/read", async (req, res, next) => {
   try {
     const parsed = readQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid query", details: parsed.error.flatten() });
+      return res.status(400).json({ error: "Invalid query", details: zodIssues(parsed.error) });
     }
 
     const { host = config.MODBUS_HOST, port, unitId, timeoutMs, publish } = parsed.data;
@@ -86,11 +94,60 @@ app.get("/api/v1/meter/discover", async (req, res, next) => {
   try {
     const parsed = discoverQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid query", details: parsed.error.flatten() });
+      return res.status(400).json({ error: "Invalid query", details: zodIssues(parsed.error) });
     }
 
     const result = await discoverMeters(parsed.data);
     return res.json({
+      count: result.length,
+      result
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+const discoverUnitIdQuerySchema = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535).optional(),
+  fromUnitId: z.coerce.number().int().min(1).max(247).optional(),
+  toUnitId: z.coerce.number().int().min(1).max(247).optional(),
+  timeoutMs: z.coerce.number().int().min(100).max(5000).optional(),
+  probe: z.enum(["holding", "input", "both"]).optional()
+});
+
+app.get("/api/v1/meter/discover-unitid", async (req, res, next) => {
+  try {
+    const parsed = discoverUnitIdQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid query", details: zodIssues(parsed.error) });
+    }
+
+    const {
+      host,
+      port,
+      fromUnitId,
+      toUnitId,
+      timeoutMs,
+      probe
+    } = parsed.data;
+
+    const result = await discoverUnitIds({
+      host,
+      port,
+      fromUnitId,
+      toUnitId,
+      timeoutMs,
+      probe
+    });
+
+    return res.json({
+      target: { host, port: port ?? config.MODBUS_PORT },
+      range: {
+        fromUnitId: fromUnitId ?? 1,
+        toUnitId: toUnitId ?? 247
+      },
+      probe: probe ?? "both",
       count: result.length,
       result
     });
