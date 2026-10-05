@@ -95,6 +95,14 @@ Lire un POLIER MM80LMZMOD:
 curl "http://localhost:3000/api/v1/meter/read-profile?host=192.168.1.19&profile=polier-mm80lmzmod&unitId=91"
 ```
 
+Lire un débitmètre TUF-2000M:
+
+```bash
+curl "http://localhost:3000/api/v1/meter/read-profile?host=192.168.1.20&profile=tuf-2000m&unitId=1"
+```
+
+Le profil utilise les registres Holding (fonction Modbus 03). Les numéros de registre du manuel sont convertis en adresses Modbus commençant à zéro. La liaison série RTU du TUF est à configurer par défaut en `9600, 8N1` (parité None), avec le même débit, la même parité et le même nombre de bits d'arrêt sur la passerelle RS485. Le profil suppose l'adresse esclave `1`; remplacer `unitId` par l'adresse réelle si nécessaire. Les valeurs REAL4 et les adresses devront être vérifiées par lecture brute lors de la mise en service.
+
 ## 6) PM2
 
 ```bash

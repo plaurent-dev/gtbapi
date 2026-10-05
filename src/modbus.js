@@ -34,6 +34,33 @@ const PROFILE_DEFINITIONS = {
       { name: "export_energy_kwh", type: "input", address: 0x004a, count: 2, decode: "float32be" },
       { name: "total_energy_kwh", type: "input", address: 0x0156, count: 2, decode: "float32be" }
     ]
+  },
+  "tuf-2000m": {
+    defaultUnitId: 1,
+    fields: [
+      { name: "flow_rate_m3_h", type: "holding", address: 0, count: 2, decode: "float32be" },
+      { name: "energy_flow_rate_gj_h", type: "holding", address: 2, count: 2, decode: "float32be" },
+      { name: "velocity_m_s", type: "holding", address: 4, count: 2, decode: "float32be" },
+      { name: "fluid_sound_speed_m_s", type: "holding", address: 6, count: 2, decode: "float32be" },
+      { name: "net_total_m3", type: "holding", address: 112, count: 2, decode: "float32be" },
+      { name: "positive_total_m3", type: "holding", address: 114, count: 2, decode: "float32be" },
+      { name: "negative_total_m3", type: "holding", address: 116, count: 2, decode: "float32be" },
+      { name: "net_energy_gj", type: "holding", address: 118, count: 2, decode: "float32be" },
+      { name: "positive_energy_gj", type: "holding", address: 120, count: 2, decode: "float32be" },
+      { name: "negative_energy_gj", type: "holding", address: 122, count: 2, decode: "float32be" },
+      { name: "flow_today_m3", type: "holding", address: 124, count: 2, decode: "float32be" },
+      { name: "flow_this_month_m3", type: "holding", address: 126, count: 2, decode: "float32be" },
+      { name: "temperature_1_c", type: "holding", address: 32, count: 2, decode: "float32be" },
+      { name: "temperature_2_c", type: "holding", address: 34, count: 2, decode: "float32be" },
+      { name: "error_code", type: "holding", address: 71, count: 1, decode: "uint16" },
+      { name: "working_step_signal_quality", type: "holding", address: 91, count: 1, decode: "uint16" },
+      { name: "flow_rate_unit_code", type: "holding", address: 1436, count: 1, decode: "uint16" },
+      { name: "totalizer_unit_code", type: "holding", address: 1437, count: 1, decode: "uint16" },
+      { name: "totalizer_multiplier", type: "holding", address: 1438, count: 1, decode: "uint16" },
+      { name: "energy_multiplier", type: "holding", address: 1439, count: 1, decode: "uint16" },
+      { name: "energy_rate_unit_code", type: "holding", address: 1440, count: 1, decode: "uint16" },
+      { name: "device_address", type: "holding", address: 1441, count: 1, decode: "uint16" }
+    ]
   }
 };
 
