@@ -43,9 +43,14 @@ async function shutdown(signal) {
       return;
     }
     try {
-      await app.locals.profileInventoryPool?.end();
+      const results = await Promise.allSettled([
+        app.locals.profileInventoryPool?.end(),
+        app.locals.measurementsPool?.end()
+      ]);
+      const failure = results.find(result => result.status === "rejected");
+      if (failure) throw failure.reason;
     } catch (error) {
-      logger.error({ err: error }, "Error while closing profile inventory pool");
+      logger.error({ err: error }, "Error while closing PostgreSQL pools");
       process.exit(1);
       return;
     }

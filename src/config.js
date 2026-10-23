@@ -9,6 +9,10 @@ const envSchema = z.object({
   PGDATABASE: z.string().default("gtb_db"),
   PGUSER: z.string().default(""),
   PGPASSWORD: z.string().default(""),
+  MEASUREMENTS_API_KEY: z.string().max(512).default("").refine(
+    value => value === "" || /^[A-Za-z0-9._~+/-]{32,}={0,2}$/.test(value),
+    { message: "Use an empty value to disable ingestion, or a Bearer key of at least 32 token characters." }
+  ),
 
   MODBUS_HOST: z.string().optional().default(""),
   MODBUS_PORT: z.coerce.number().int().min(1).max(65535).default(4196),

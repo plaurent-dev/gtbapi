@@ -14,10 +14,13 @@ const {
 const { discoverMeters } = require("./discovery");
 const { publishMeasurements } = require("./publisher");
 const { createProfileInventoryPool, readProfileInventory } = require("./profile-inventory");
+const { createMeasurementsPool, createMeasurementsRouter } = require("./measurements");
 
 const app = express();
 app.disable("x-powered-by");
 app.locals.profileInventoryPool = createProfileInventoryPool(config);
+app.locals.measurementsPool = createMeasurementsPool(config);
+app.locals.measurementsApiKey = config.MEASUREMENTS_API_KEY;
 
 function zodIssues(error) {
   return error.issues.map((issue) => ({
@@ -26,7 +29,6 @@ function zodIssues(error) {
   }));
 }
 
-app.use(express.json({ limit: "100kb" }));
 app.use(
   pinoHttp({
     logger,
@@ -38,6 +40,8 @@ app.use(
     }
   })
 );
+app.use("/api/v1/meter/measurements", createMeasurementsRouter());
+app.use(express.json({ limit: "100kb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });

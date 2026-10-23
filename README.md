@@ -18,10 +18,12 @@ Variables importantes:
 - `MODBUS_HOST`: IP de la passerelle Waveshare (si connue)
 - `MODBUS_PORT`: port Modbus TCP (par defaut `4196`)
 - `MODBUS_UNIT_ID`: ID esclave (`91` dans ton script Python)
-- `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` : acces en lecture
-  a l'inventaire partage de cordongtb pour enrichir la liste des profils.
+- `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` : connexion PostgreSQL
+  pour l'inventaire partage de cordongtb et, si activee, l'insertion de mesures.
   Sans `PGUSER`, les profils et lectures Modbus restent disponibles, mais les
   listes `gateways` sont explicitement indisponibles.
+- `MEASUREMENTS_API_KEY` : cle Bearer obligatoire pour l'insertion HTTP de
+  mesures (au moins 32 caracteres). Vide par defaut : insertion desactivee.
 
 ## 3) Demarrage local
 
@@ -234,6 +236,140 @@ firmware reels ; ne pas utiliser cette operation pour un autre profil.
 
 Validation sans materiel : `node --test test\modbus-unitid.test.js`.
 
+## 5f) Inserer les mesures depuis n8n
+
+`POST /api/v1/meter/measurements` insere **une ligne par appel** dans la table
+existante `public.mesures_rs485`. Il remplace le noeud PostgreSQL d'insertion,
+pas les lectures Modbus. Aucune table ni migration n'est creee automatiquement.
+La route ne lit pas le capteur et ne modifie ni son Unit ID ni son inventaire.
+
+### Activer et proteger l'insertion
+
+Dans le `.env` du service GTBApi, conserver les memes variables `PG*` que pour
+l'inventaire et ajouter `MEASUREMENTS_API_KEY`. Generer localement une cle
+aleatoire, puis la conserver hors du depot et des exports de workflows :
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Copier cette valeur dans `MEASUREMENTS_API_KEY=...`, puis redemarrer GTBApi.
+La cle doit contenir de 32 a 512 caracteres de jeton Bearer (par exemple les
+64 caracteres hexadecimaux generes ci-dessus). Une cle non vide invalide empeche
+le demarrage. L'en-tete `Authorization` est masque dans les journaux HTTP.
+Ne jamais placer la cle dans l'URL ou le corps JSON.
+
+Sans cle, la route renvoie **503**, tandis que les profils et lectures continuent
+de fonctionner. Avec une cle configuree, une requete sans
+`Authorization: Bearer <cle>` valide renvoie **401**, avant toute analyse du JSON
+ou requete PostgreSQL.
+
+Un **pool d'ecriture distinct** utilise les memes variables `PG*` ; le pool de
+lecture de l'inventaire reste force en lecture seule. Les deux pools sont limites
+et fermes a l'arret. Pour ce nouveau pool, le role `PGUSER` doit avoir CONNECT,
+USAGE sur `public` et INSERT sur la table. Si ces deux premiers droits existent
+deja, la commande supplementaire est, **a faire executer manuellement par
+l'administrateur**, en adaptant le role si necessaire :
+
+```sql
+GRANT INSERT ON TABLE public.mesures_rs485 TO gtb_api_user;
+```
+
+Aucun droit SELECT supplementaire n'est requis pour inserer : la route ne fait
+pas de `RETURNING`. Conserver SELECT sur `public.gtb_sensors` pour les listes de
+passerelles. Pour conserver le compte web cordongtb en lecture seule sur
+l'historique, preferer un role collecteur distinct dans le `PGUSER` de GTBApi,
+sans modifier le `PGUSER` de cordongtb.
+
+**Ne pas exposer directement ce service a Internet.** Utiliser HTTPS via un proxy
+ou un tunnel chiffre pour proteger la cle en transit ; HTTP simple ne chiffre
+ni la cle ni les mesures. Les autres routes Modbus conservent leur protection
+reseau actuelle, cette cle ne les protege pas.
+
+### Contrat JSON
+
+URL de l'installation : `http://{{ip}}:7001/api/v1/meter/measurements`.
+En-tetes : `Content-Type: application/json` et `Authorization: Bearer <cle>`.
+Exemple documentaire (adresse reservee, pas un equipement reel) :
+
+```json
+{
+  "time": "2026-10-05T14:00:00.123456+02:00",
+  "capteur_id": 1,
+  "valeur": 27.3,
+  "site": "CORDON_SMB",
+  "waveshare_ip": "192.0.2.10",
+  "mesure": "temperature",
+  "unite": "degC"
+}
+```
+
+Les **sept champs sont obligatoires**, sans champs inconnus ni tableaux :
+
+| Champ | Validation |
+| --- | --- |
+| `time` | ISO 8601 avec `Z` ou decalage horaire ; horodatage source transmis sans conversion JavaScript, precision PostgreSQL a la microseconde |
+| `capteur_id` | Nombre entier positif, maximum 2147483647 ; pas une chaine numerique |
+| `valeur` | Nombre fini, accepte zero, negatifs et decimales ; pas une chaine numerique |
+| `site`, `mesure` | Texte non vide, espaces peripheriques retires, maximum 200 caracteres |
+| `waveshare_ip` | Adresse IPv4 seule, sans masque ni nom DNS |
+| `unite` | Texte, peut etre vide, espaces peripheriques retires, maximum 200 caracteres |
+
+Le corps est limite a **16 Kio**, JSON non compresse. `capteur_id` est un
+identifiant historique, pas necessairement un Unit ID : des valeurs superieures
+a 247 restent valides. Pour votre workflow, il reprend explicitement `unit_id`.
+Il n'y a ni recherche de profil ni substitution silencieuse de metadonnees.
+
+Succes : **201 Created**, uniquement apres confirmation d'une ligne inseree :
+
+```json
+{ "inserted": 1 }
+```
+
+Erreurs : **400** (JSON, champs ou contraintes invalides), **401** (authentification),
+**409** (eventuelle contrainte d'unicite en base), **413** (taille), **415** (type ou
+encodage), **503** (fonction desactivee, configuration, droits ou connexion).
+Les erreurs PostgreSQL sont journalisees par code sans exposer leur contenu.
+Les echecs d'ecriture comportent `outcome: "not_inserted"` si PostgreSQL a refuse
+la ligne, ou **`outcome: "unknown"`** si l'insertion n'est pas confirmee.
+
+**Chaque appel insere, meme si la mesure existe deja.** Aucun retry automatique,
+aucune deduplication ni cle d'idempotence. Si la reponse est perdue ou si
+`outcome` vaut `unknown`, verifier l'historique avant de renvoyer : une ligne peut
+deja etre presente. Des retries n8n peuvent donc creer des doublons, qui
+participent ensuite aux agregations de l'historique.
+
+### Remplacer le noeud PostgreSQL n8n
+
+Ajouter un noeud **HTTP Request**, execute pour chaque item :
+
+1. Methode **POST**, URL ci-dessus, avec l'IP reelle du service.
+2. Authentication **Generic Credential Type > Header Auth** : nom
+   `Authorization`, valeur `Bearer <votre cle>`. Stocker ceci dans les credentials
+   n8n, pas dans un en-tete ecrit en clair dans le workflow.
+3. **Send Body**, type **JSON**, **Using JSON** ; passer le champ entier en mode
+   **Expression** et coller :
+
+```javascript
+={{ ({
+  time: $json.timestamp,
+  capteur_id: $json.unit_id,
+  valeur: $json.value,
+  site: "CORDON_SMB",
+  waveshare_ip: $json.host,
+  mesure: $json.metric,
+  unite: $json.unit
+}) }}
+```
+
+Cette expression conserve les types numeriques de `unit_id` et `value`, sans
+conversion automatique de chaines, et reproduit les sept colonnes du noeud
+PostgreSQL fourni. Le noeud HTTP renvoie `{ "inserted": 1 }` et non la ligne SQL.
+Desactiver **Retry On Fail** si vous ne souhaitez pas de doublons automatiques.
+Ne pas activer **Never Error** : les echecs doivent rester visibles dans n8n.
+
+Validation locale sans base distante : `node --test test\measurements.test.js`.
+
 ## 6) PM2
 
 ```bash
@@ -257,6 +393,7 @@ npm run pm2:stop
 - `GET /api/v1/meter/profiles`
 - `GET /api/v1/meter/read-profile`
 - `POST /api/v1/meter/change-unitid` (Eastron SDM120CT, mode SET confirme)
+- `POST /api/v1/meter/measurements` (insertion historique, cle Bearer obligatoire)
 
 Option de publication MQTT/GELF a la demande:
 - `GET /api/v1/meter/read?host=...&publish=true`
