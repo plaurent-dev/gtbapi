@@ -4,6 +4,11 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.string().default("info"),
+  PGHOST: z.string().default("10.62.20.49"),
+  PGPORT: z.coerce.number().int().min(1).max(65535).default(5432),
+  PGDATABASE: z.string().default("gtb_db"),
+  PGUSER: z.string().default(""),
+  PGPASSWORD: z.string().default(""),
 
   MODBUS_HOST: z.string().optional().default(""),
   MODBUS_PORT: z.coerce.number().int().min(1).max(65535).default(4196),

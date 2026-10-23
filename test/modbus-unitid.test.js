@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const ModbusRTU = require("modbus-serial");
 const { changeUnitId, readDeviceProfile } = require("../src/modbus");
 const app = require("../src/app");
+app.locals.profileInventoryPool = null;
 
 function registers(value) {
   const bytes = Buffer.alloc(4);

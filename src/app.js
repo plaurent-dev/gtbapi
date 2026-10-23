@@ -13,9 +13,11 @@ const {
 } = require("./modbus");
 const { discoverMeters } = require("./discovery");
 const { publishMeasurements } = require("./publisher");
+const { createProfileInventoryPool, readProfileInventory } = require("./profile-inventory");
 
 const app = express();
 app.disable("x-powered-by");
+app.locals.profileInventoryPool = createProfileInventoryPool(config);
 
 function zodIssues(error) {
   return error.issues.map((issue) => ({
@@ -201,11 +203,13 @@ app.get("/api/v1/meter/read-raw", async (req, res, next) => {
   }
 });
 
-app.get("/api/v1/meter/profiles", (_req, res) => {
+app.get("/api/v1/meter/profiles", async (req, res) => {
+  const inventory = await readProfileInventory(req.app.locals.profileInventoryPool, Object.keys(PROFILE_DEFINITIONS));
   const profiles = Object.entries(PROFILE_DEFINITIONS).map(([name, def]) => ({
     name,
     defaultUnitId: def.defaultUnitId,
     canChangeUnitId: def.canChangeUnitId === true,
+    gateways: inventory.byProfile ? inventory.byProfile.get(name) : null,
     fields: def.fields.map((field) => ({
       name: field.name,
       type: field.type,
@@ -215,7 +219,7 @@ app.get("/api/v1/meter/profiles", (_req, res) => {
     }))
   }));
 
-  res.json({ count: profiles.length, profiles });
+  res.json({ count: profiles.length, profiles, gatewaysAvailable: inventory.gatewaysAvailable, gatewaysWarning: inventory.gatewaysWarning });
 });
 
 const readProfileQuerySchema = z.object({

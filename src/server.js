@@ -36,10 +36,18 @@ async function shutdown(signal) {
 
   closePublishers();
 
-  server.close((err) => {
+  server.close(async (err) => {
     if (err) {
       logger.error({ err }, "Error while closing server");
       process.exit(1);
+      return;
+    }
+    try {
+      await app.locals.profileInventoryPool?.end();
+    } catch (error) {
+      logger.error({ err: error }, "Error while closing profile inventory pool");
+      process.exit(1);
+      return;
     }
     process.exit(0);
   });

@@ -18,6 +18,10 @@ Variables importantes:
 - `MODBUS_HOST`: IP de la passerelle Waveshare (si connue)
 - `MODBUS_PORT`: port Modbus TCP (par defaut `4196`)
 - `MODBUS_UNIT_ID`: ID esclave (`91` dans ton script Python)
+- `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` : acces en lecture
+  a l'inventaire partage de cordongtb pour enrichir la liste des profils.
+  Sans `PGUSER`, les profils et lectures Modbus restent disponibles, mais les
+  listes `gateways` sont explicitement indisponibles.
 
 ## 3) Demarrage local
 
@@ -82,6 +86,58 @@ Lister les profils disponibles:
 ```bash
 curl "http://localhost:3000/api/v1/meter/profiles"
 ```
+
+Chaque profil conserve ses definitions et ajoute `gateways`, avec **une entree
+par capteur enregistre** dans `public.gtb_sensors`. Exemple de ce champ pour
+`eastron-sdm120ct` :
+
+```json
+{
+  "gateways": [
+    { "host": "10.107.31.4", "port": 4196, "unitId": 10 },
+    { "host": "10.107.31.4", "port": 4196, "unitId": 20 },
+    { "host": "10.107.31.5", "port": 502, "unitId": 1 }
+  ]
+}
+```
+
+Une meme passerelle peut donc apparaitre plusieurs fois avec des Unit ID
+differents. Les profils sans capteur enregistre ont `gateways: []`. Les listes
+sont triees par IP, port et Unit ID et relues en base a chaque requete : une
+reaffectation, suppression ou modification d'Unit ID enregistree dans cordongtb
+est visible au prochain appel. `count` reste le nombre de profils, pas de capteurs.
+Il ne s'agit pas d'un scan reseau ni d'une preuve de presence des equipements.
+Les objets uniquement declares sur le plan, sans entree dans l'inventaire, ne
+sont pas inclus. Seuls les profils connus de cette version de GTBApi sont listes.
+
+Au niveau racine, `gatewaysAvailable: true` et `gatewaysWarning: null` confirment
+que l'inventaire a ete lu. Sans configuration, en cas d'erreur de connexion, de
+schema ou de droits, la reponse HTTP reste **200** avec toutes les definitions,
+mais chaque profil porte **`gateways: null`** et la racine contient
+`gatewaysAvailable: false` ainsi qu'un message explicite dans `gatewaysWarning`.
+Ne pas interpreter `null` comme une liste vide. Les lectures Modbus ne dependent
+pas de PostgreSQL. Plus de 1000 capteurs correspondants provoquent aussi ce mode
+degrade, sans liste partielle. Les details internes des erreurs ne sont pas exposes.
+
+Configurer le fichier `.env` **du service GTBApi**, independamment de celui de
+cordongtb, avec la meme base d'inventaire :
+
+```dotenv
+PGHOST=10.62.20.49
+PGPORT=5432
+PGDATABASE=gtb_db
+PGUSER=gtb_api_user
+PGPASSWORD=
+```
+
+Renseigner le mot de passe hors du depot, puis redemarrer GTBApi. Aucun schema
+ni migration supplementaire n'est cree ; la table de la migration 009 de
+cordongtb doit deja exister. Le compte PostgreSQL peut etre un role dedie en
+lecture seule ; seuls CONNECT a la base, USAGE sur le schema et SELECT sur
+`public.gtb_sensors` sont necessaires. Les requetes du pool sont en lecture
+seule, avec delais limites et fermeture du pool a l'arret du service.
+Ne pas exposer publiquement cet endpoint interne, qui contient les adresses des
+equipements enregistres.
 
 Lire un Eastron SDM120CT avec decoding metier:
 

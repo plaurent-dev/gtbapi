@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const ModbusRTU = require("modbus-serial");
 const { readDeviceProfile } = require("../src/modbus");
 const app = require("../src/app");
+app.locals.profileInventoryPool = null;
 
 function sensor(context, registers) {
   const calls = [];
@@ -51,7 +52,7 @@ test("HTTP exposes TS85-B metadata and reads the requested gateway and Unit ID",
   const base = `http://127.0.0.1:${server.address().port}/api/v1/meter`;
   const profiles = await (await fetch(`${base}/profiles`)).json();
   assert.deepEqual(profiles.profiles.find(profile => profile.name === "ts85-b"), {
-    name: "ts85-b", defaultUnitId: 1, canChangeUnitId: false,
+    name: "ts85-b", defaultUnitId: 1, canChangeUnitId: false, gateways: null,
     fields: [
       { name: "temperature_c", type: "holding", address: 0, count: 1, decode: "int16_tenths" },
       { name: "humidity_percent", type: "holding", address: 1, count: 1, decode: "uint16_tenths" },
