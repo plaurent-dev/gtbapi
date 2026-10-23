@@ -1,5 +1,6 @@
 const ModbusRTU = require("modbus-serial");
 const config = require("./config");
+const { setTimeout: delay } = require("node:timers/promises");
 
 const REGISTER_DEFINITION = [
   { address: 0x00, name: "serial_number", count: 1 },
@@ -24,7 +25,9 @@ const PROFILE_DEFINITIONS = {
   },
   "eastron-sdm120ct": {
     defaultUnitId: 1,
+    canChangeUnitId: true,
     fields: [
+      { name: "device_address", type: "holding", address: 0x0014, count: 2, decode: "float32be" },
       { name: "voltage_v", type: "input", address: 0x0000, count: 2, decode: "float32be" },
       { name: "current_a", type: "input", address: 0x0006, count: 2, decode: "float32be" },
       { name: "active_power_w", type: "input", address: 0x000c, count: 2, decode: "float32be" },
@@ -328,6 +331,57 @@ async function readDeviceProfile({
   });
 }
 
+const changingGateways = new Set();
+
+async function changeUnitId({ host, port = config.MODBUS_PORT, unitId, newUnitId, profile, setupConfirmed, timeoutMs = config.MODBUS_TIMEOUT_MS }) {
+  if (!host || profile !== "eastron-sdm120ct" || setupConfirmed !== true ||
+      !Number.isInteger(unitId) || unitId < 1 || unitId > 247 ||
+      !Number.isInteger(newUnitId) || newUnitId < 1 || newUnitId > 247 || newUnitId === unitId) {
+    throw Object.assign(new Error("Profil Eastron, mode SET confirme et deux Unit ID distincts entre 1 et 247 requis."), { statusCode: 400 });
+  }
+  const gateway = `${host}:${port}`;
+  if (changingGateways.has(gateway)) {
+    throw Object.assign(new Error("Un changement d'Unit ID est deja en cours sur cette passerelle."), { statusCode: 409 });
+  }
+  changingGateways.add(gateway);
+  try {
+    return await withClient(host, port, unitId, timeoutMs, async client => {
+      const current = await client.readHoldingRegisters(0x0014, 2);
+      if (decodeFloat32BE(...current.data) !== unitId) {
+        throw Object.assign(new Error("L'adresse lue dans le compteur ne correspond pas a l'Unit ID cible. Aucune ecriture effectuee."), { statusCode: 409 });
+      }
+      client.setID(newUnitId);
+      for (const probe of [
+        () => client.readHoldingRegisters(0x0014, 2),
+        () => client.readInputRegisters(0, 2)
+      ]) {
+        try {
+          await probe();
+        } catch (error) {
+          if (error.errno === "ETIMEDOUT") continue;
+          if (!error.modbusCode) throw error;
+        }
+        throw Object.assign(new Error("Le nouvel Unit ID repond deja sur cette passerelle. Aucune ecriture effectuee."), { statusCode: 409 });
+      }
+      client.setID(unitId);
+      const bytes = Buffer.alloc(4);
+      bytes.writeFloatBE(newUnitId);
+      try {
+        await client.writeRegisters(0x0014, [bytes.readUInt16BE(0), bytes.readUInt16BE(2)]);
+        await delay(300);
+        client.setID(newUnitId);
+        const verified = await client.readHoldingRegisters(0x0014, 2);
+        if (decodeFloat32BE(...verified.data) !== newUnitId) throw new Error("Adresse relue differente de l'adresse demandee.");
+      } catch (error) {
+        throw Object.assign(new Error(`Changement non confirme : ${error.message}. L'adresse peut avoir change. Rechercher les deux Unit ID avant toute nouvelle ecriture ; verifier le mode SET.`), { statusCode: 502 });
+      }
+      return { previousUnitId: unitId, unitId: newUnitId, verified: true };
+    });
+  } finally {
+    changingGateways.delete(gateway);
+  }
+}
+
 module.exports = {
   REGISTER_DEFINITION,
   PROFILE_DEFINITIONS,
@@ -335,5 +389,6 @@ module.exports = {
   probeMeter,
   discoverUnitIds,
   readRawRegisters,
-  readDeviceProfile
+  readDeviceProfile,
+  changeUnitId
 };

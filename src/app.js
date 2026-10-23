@@ -8,6 +8,7 @@ const {
   discoverUnitIds,
   readRawRegisters,
   readDeviceProfile,
+  changeUnitId,
   PROFILE_DEFINITIONS
 } = require("./modbus");
 const { discoverMeters } = require("./discovery");
@@ -204,6 +205,7 @@ app.get("/api/v1/meter/profiles", (_req, res) => {
   const profiles = Object.entries(PROFILE_DEFINITIONS).map(([name, def]) => ({
     name,
     defaultUnitId: def.defaultUnitId,
+    canChangeUnitId: def.canChangeUnitId === true,
     fields: def.fields.map((field) => ({
       name: field.name,
       type: field.type,
@@ -249,8 +251,30 @@ app.get("/api/v1/meter/read-profile", async (req, res, next) => {
   }
 });
 
+const changeUnitIdSchema = z.object({
+  host: z.ipv4(),
+  port: z.number().int().min(1).max(65535).optional(),
+  unitId: z.number().int().min(1).max(247),
+  newUnitId: z.number().int().min(1).max(247),
+  profile: z.literal("eastron-sdm120ct"),
+  setupConfirmed: z.literal(true),
+  timeoutMs: z.number().int().min(100).max(15000).optional()
+}).strict().refine(value => value.unitId !== value.newUnitId);
+
+app.post("/api/v1/meter/change-unitid", async (req, res, next) => {
+  const parsed = changeUnitIdSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Parametres de changement d'Unit ID invalides", details: zodIssues(parsed.error) });
+  try {
+    const result = await changeUnitId(parsed.data);
+    return res.json({ target: { host: parsed.data.host, port: parsed.data.port ?? config.MODBUS_PORT, unitId: result.unitId }, ...result });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 app.use((err, _req, res, _next) => {
   logger.error({ err }, "Unhandled error");
+  if ([400, 409, 502].includes(err.statusCode)) return res.status(err.statusCode).json({ error: err.message });
   res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
