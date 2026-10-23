@@ -38,6 +38,14 @@ const PROFILE_DEFINITIONS = {
       { name: "total_energy_kwh", type: "input", address: 0x0156, count: 2, decode: "float32be" }
     ]
   },
+  "ts85-b": {
+    defaultUnitId: 1,
+    fields: [
+      { name: "temperature_c", type: "holding", address: 0x0000, count: 1, decode: "int16_tenths" },
+      { name: "humidity_percent", type: "holding", address: 0x0001, count: 1, decode: "uint16_tenths" },
+      { name: "co2_ppm", type: "holding", address: 0x0002, count: 1, decode: "uint16" }
+    ]
+  },
   "tuf-2000m": {
     defaultUnitId: 1,
     fields: [
@@ -129,6 +137,15 @@ function decodeRegisterValue(definition, registers) {
 function decodeByType(decode, registers) {
   if (decode === "uint16") {
     return registers[0];
+  }
+
+  if (decode === "int16_tenths") {
+    const raw = registers[0];
+    return (raw >= 0x8000 ? raw - 0x10000 : raw) / 10;
+  }
+
+  if (decode === "uint16_tenths") {
+    return registers[0] / 10;
   }
 
   if (decode === "float32be") {
