@@ -370,15 +370,16 @@ async function readRelayInputs({ host, port = config.MODBUS_PORT, unitId, profil
   }
   try {
     return await withClient(host, port, unitId, timeoutMs, async client => {
-      const result = await client.readDiscreteInputs(0, 4);
-      if (!Array.isArray(result.data) || result.data.length < 4
-        || result.data.slice(0, 4).some(value => ![true, false, 0, 1].includes(value))) {
+      // Match the vendor's eight-bit request; expose only the first four inputs.
+      const result = await client.readDiscreteInputs(0, 8);
+      if (!Array.isArray(result.data) || result.data.length < 8
+        || result.data.slice(0, 8).some(value => ![true, false, 0, 1].includes(value))) {
         throw new Error("Reponse FC02 invalide");
       }
       return { profile, unitId, data: Object.fromEntries(result.data.slice(0, 4).map((value, index) => [`input_${index + 1}`, Number(value)])) };
     });
   } catch (error) {
-    throw Object.assign(new Error("Entrees numeriques indisponibles : aucune lecture FC02 valide. Verifier la communication et la compatibilite du firmware (adresses 0 a 3).", { cause: error }), { statusCode: 502 });
+    throw Object.assign(new Error("Entrees numeriques indisponibles : aucune lecture FC02 valide. Verifier la communication et la compatibilite du firmware (adresse 0, quantite 8 bits).", { cause: error }), { statusCode: 502 });
   }
 }
 

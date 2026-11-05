@@ -82,12 +82,12 @@ test("HTTP capability and strictly validated POST relay command", async context 
   assert.equal(response.status, 200);
   assert.equal((await response.json()).verified, true);
 });
-test("FC02 reads four discrete inputs at zero with no coil reads or writes", async context => {
+test("FC02 requests eight bits at zero and exposes only IN1-IN4 without coil reads or writes", async context => {
   const calls = board(context);
   const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async function (address, count) {
     assert.equal(this.getID(), 1);
-    assert.equal(address, 0); assert.equal(count, 4);
-    return { data: [false, true, 0, 1, false, false, false, false] };
+    assert.equal(address, 0); assert.equal(count, 8);
+    return { data: [false, true, 0, 1, true, false, 1, 0] };
   });
   assert.deepEqual(await readRelayInputs(params), {
     profile: "stm8-4relay", unitId: 1, data: { input_1: 0, input_2: 1, input_3: 0, input_4: 1 }
@@ -95,7 +95,8 @@ test("FC02 reads four discrete inputs at zero with no coil reads or writes", asy
   assert.equal(read.mock.callCount(), 1);
   assert.equal(calls.length, 0);
 });
-for (const data of [[true, false], [0, 1, null, 0], ["0", 1, 0, 1]]) test(`invalid input response is explicitly unavailable: ${JSON.stringify(data)}`, async context => {
+for (const data of [[true, false], [0, 1, 0, 1], [0, 1, 0, 1, 0, 0, 0],
+  [0, 1, null, 0, 0, 0, 0, 0], ["0", 1, 0, 1, 0, 0, 0, 0], [0, 1, 0, 1, 0, 0, 0, null]]) test(`invalid input response is explicitly unavailable: ${JSON.stringify(data)}`, async context => {
   const calls = board(context);
   context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async () => ({ data }));
   await assert.rejects(readRelayInputs(params), error => error.statusCode === 502 && /indisponibles/.test(error.message));
@@ -119,9 +120,10 @@ test("invalid digital input parameters never connect", async context => {
 test("HTTP discrete input read validates target and reports FC02 failures", async context => {
   board(context);
   let fail = false;
-  const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async () => {
+  const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async (address, count) => {
+    assert.equal(address, 0); assert.equal(count, 8);
     if (fail) throw new Error("Illegal function");
-    return { data: [0, 1, 0, 1] };
+    return { data: [0, 1, 0, 1, 1, 1, 1, 1] };
   });
   const server = app.listen(0, "127.0.0.1"); await new Promise(resolve => server.once("listening", resolve));
   context.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));

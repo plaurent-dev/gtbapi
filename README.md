@@ -28,12 +28,15 @@ n'est expose par ce profil.
 
 Les entrees IN1 a IN4 ont une lecture independante :
 `GET /api/v1/meter/read-relay-inputs?host=...&port=4196&unitId=1&profile=stm8-4relay`.
-Elle utilise uniquement FC02, adresse 0, quantite 4, et retourne
+Elle utilise uniquement FC02, adresse 0, quantite 8 bits, et retourne uniquement IN1 a IN4 :
 `data: {input_1: 0, input_2: 1, input_3: 0, input_4: 1}`, la cible et l'horodatage.
 Les bits sont restitues sans inversion ; le cablage/firmware determine leur
 signification physique. Une erreur ou une reponse invalide donne HTTP 502
 avec un message explicite, sans etat OFF fictif et sans bloquer FC01/FC05.
-Cette table FC02 reste a confirmer sur la carte reelle. La lecture des relais
+La quantite de 8 suit l'exemple de la rubrique 11 de la
+[notice du vendeur](https://fr.aliexpress.com/item/1005008904384687.html#nav-description),
+qui demande huit bits meme si seuls quatre sont affiches. Les bits 4 a 7 ne
+sont pas exposes. La lecture reste a confirmer sur la carte reelle. La lecture des relais
 et leurs commandes ne lisent pas les entrees.
 
 Cette API Modbus n'authentifie pas ses appels : la garder sur un reseau prive,
