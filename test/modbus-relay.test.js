@@ -1,7 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const ModbusRTU = require("modbus-serial");
-const { readDeviceProfile, writeRelay } = require("../src/modbus");
+const { readDeviceProfile, writeRelay, readRelayInputs } = require("../src/modbus");
 const app = require("../src/app");
 app.locals.profileInventoryPool = null;
 const params = { host: "10.107.31.5", port: 4196, unitId: 1, profile: "stm8-4relay",
@@ -81,4 +81,62 @@ test("HTTP capability and strictly validated POST relay command", async context 
   const response = await post(params);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).verified, true);
+});
+test("FC02 reads four discrete inputs at zero with no coil reads or writes", async context => {
+  const calls = board(context);
+  const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async function (address, count) {
+    assert.equal(this.getID(), 1);
+    assert.equal(address, 0); assert.equal(count, 4);
+    return { data: [false, true, 0, 1, false, false, false, false] };
+  });
+  assert.deepEqual(await readRelayInputs(params), {
+    profile: "stm8-4relay", unitId: 1, data: { input_1: 0, input_2: 1, input_3: 0, input_4: 1 }
+  });
+  assert.equal(read.mock.callCount(), 1);
+  assert.equal(calls.length, 0);
+});
+for (const data of [[true, false], [0, 1, null, 0], ["0", 1, 0, 1]]) test(`invalid input response is explicitly unavailable: ${JSON.stringify(data)}`, async context => {
+  const calls = board(context);
+  context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async () => ({ data }));
+  await assert.rejects(readRelayInputs(params), error => error.statusCode === 502 && /indisponibles/.test(error.message));
+  assert.equal(calls.length, 0);
+});
+test("FC02 timeout does not block relay reads or commands and never retries", async context => {
+  board(context);
+  const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async () => { throw new Error("Timeout"); });
+  await assert.rejects(readRelayInputs(params), error => error.statusCode === 502);
+  assert.equal(read.mock.callCount(), 1);
+  assert.equal((await readDeviceProfile(params)).data.relay_1, 0);
+  assert.equal((await writeRelay(params)).verified, true);
+});
+test("invalid digital input parameters never connect", async context => {
+  const connect = context.mock.method(ModbusRTU.prototype, "connectTCP", async () => assert.fail("Must not connect"));
+  for (const patch of [{ profile: "ts85-b" }, { unitId: 0 }, { unitId: 248 }, { unitId: 1.5 }]) {
+    await assert.rejects(readRelayInputs({ ...params, ...patch }), error => error.statusCode === 400);
+  }
+  assert.equal(connect.mock.callCount(), 0);
+});
+test("HTTP discrete input read validates target and reports FC02 failures", async context => {
+  board(context);
+  let fail = false;
+  const read = context.mock.method(ModbusRTU.prototype, "readDiscreteInputs", async () => {
+    if (fail) throw new Error("Illegal function");
+    return { data: [0, 1, 0, 1] };
+  });
+  const server = app.listen(0, "127.0.0.1"); await new Promise(resolve => server.once("listening", resolve));
+  context.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${server.address().port}/api/v1/meter`;
+  const query = { host: params.host, port: params.port, unitId: 1, profile: params.profile };
+  for (const patch of [{ unitId: 0 }, { profile: "ts85-b" }, { count: 8 }]) {
+    assert.equal((await fetch(`${base}/read-relay-inputs?${new URLSearchParams({ ...query, ...patch })}`)).status, 400);
+  }
+  assert.equal(read.mock.callCount(), 0);
+  const response = await fetch(`${base}/read-relay-inputs?${new URLSearchParams(query)}`);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(result.data, { input_1: 0, input_2: 1, input_3: 0, input_4: 1 });
+  assert.equal(result.target.port, params.port);
+  assert.ok(Number.isFinite(Date.parse(result.timestamp)));
+  fail = true;
+  assert.equal((await fetch(`${base}/read-relay-inputs?${new URLSearchParams(query)}`)).status, 502);
 });

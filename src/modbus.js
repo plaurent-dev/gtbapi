@@ -15,6 +15,7 @@ const PROFILE_DEFINITIONS = {
   "stm8-4relay": {
     defaultUnitId: 1,
     canWriteRelay: true,
+    canReadDigitalInputs: true,
     fields: Array.from({ length: 4 }, (_, address) => ({
       name: `relay_${address + 1}`, type: "coil", address, count: 1, decode: "bit"
     }))
@@ -363,6 +364,24 @@ async function readDeviceProfile({
 
 const changingGateways = new Set();
 
+async function readRelayInputs({ host, port = config.MODBUS_PORT, unitId, profile, timeoutMs = config.MODBUS_TIMEOUT_MS }) {
+  if (!host || profile !== "stm8-4relay" || !Number.isInteger(unitId) || unitId < 1 || unitId > 247) {
+    throw Object.assign(new Error("Profil STM8 4 relais et Unit ID entre 1 et 247 requis."), { statusCode: 400 });
+  }
+  try {
+    return await withClient(host, port, unitId, timeoutMs, async client => {
+      const result = await client.readDiscreteInputs(0, 4);
+      if (!Array.isArray(result.data) || result.data.length < 4
+        || result.data.slice(0, 4).some(value => ![true, false, 0, 1].includes(value))) {
+        throw new Error("Reponse FC02 invalide");
+      }
+      return { profile, unitId, data: Object.fromEntries(result.data.slice(0, 4).map((value, index) => [`input_${index + 1}`, Number(value)])) };
+    });
+  } catch (error) {
+    throw Object.assign(new Error("Entrees numeriques indisponibles : aucune lecture FC02 valide. Verifier la communication et la compatibilite du firmware (adresses 0 a 3).", { cause: error }), { statusCode: 502 });
+  }
+}
+
 async function writeRelay({ host, port = config.MODBUS_PORT, unitId, profile, relay, state, commandConfirmed, timeoutMs = config.MODBUS_TIMEOUT_MS }) {
   if (!host || profile !== "stm8-4relay" || commandConfirmed !== true || typeof state !== "boolean"
     || !Number.isInteger(relay) || relay < 1 || relay > 4 || !Number.isInteger(unitId) || unitId < 1 || unitId > 247) {
@@ -444,6 +463,7 @@ module.exports = {
   discoverUnitIds,
   readRawRegisters,
   readDeviceProfile,
+  readRelayInputs,
   writeRelay,
   changeUnitId
 };

@@ -10,6 +10,7 @@ const {
   readDeviceProfile,
   changeUnitId,
   writeRelay,
+  readRelayInputs,
   PROFILE_DEFINITIONS
 } = require("./modbus");
 const { discoverMeters } = require("./discovery");
@@ -215,6 +216,7 @@ app.get("/api/v1/meter/profiles", async (req, res) => {
     defaultUnitId: def.defaultUnitId,
     canChangeUnitId: def.canChangeUnitId === true,
     ...(def.canWriteRelay === true ? { canWriteRelay: true } : {}),
+    ...(def.canReadDigitalInputs === true ? { canReadDigitalInputs: true } : {}),
     gateways: inventory.byProfile ? inventory.byProfile.get(name) : null,
     fields: def.fields.map((field) => ({
       name: field.name,
@@ -270,6 +272,20 @@ const changeUnitIdSchema = z.object({
   setupConfirmed: z.literal(true),
   timeoutMs: z.number().int().min(100).max(15000).optional()
 }).strict().refine(value => value.unitId !== value.newUnitId);
+
+app.get("/api/v1/meter/read-relay-inputs", async (req, res, next) => {
+  const parsed = z.object({
+    host: z.ipv4(), port: z.coerce.number().int().min(1).max(65535).optional(),
+    unitId: z.coerce.number().int().min(1).max(247), profile: z.literal("stm8-4relay"),
+    timeoutMs: z.coerce.number().int().min(100).max(15000).optional()
+  }).strict().safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: "Parametres de lecture des entrees invalides", details: zodIssues(parsed.error) });
+  try {
+    const result = await readRelayInputs(parsed.data);
+    res.json({ target: { host: parsed.data.host, port: parsed.data.port ?? config.MODBUS_PORT, unitId: result.unitId },
+      ...result, timestamp: new Date().toISOString() });
+  } catch (error) { next(error); }
+});
 
 app.post("/api/v1/meter/change-unitid", async (req, res, next) => {
   const parsed = changeUnitIdSchema.safeParse(req.body);
