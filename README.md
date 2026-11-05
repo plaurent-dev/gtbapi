@@ -73,6 +73,33 @@ Variables importantes:
 npm run dev
 ```
 
+### PM2 en developpement avec Cordon GTB
+
+Depuis le dossier GTBApi :
+
+```powershell
+pm2 start ecosystem.dev.config.js
+```
+
+Cette configuration lance `gtb-api-dev` en mode `development` sur le port
+7001, attendu par la configuration dev de Cordon GTB. PostgreSQL utilise
+`localhost:5432`, base `gtb_db_restore`. Ces valeurs priment sur `.env` ;
+`PGUSER` et `PGPASSWORD` restent fournis par l'environnement ou `.env`.
+La base locale doit deja contenir les tables du projet.
+Le polling automatique est desactive (`POLL_INTERVAL_MS=0`), mais les appels
+HTTP de lecture et de commande continuent de viser les equipements reels.
+Garder cette API sans authentification sur un reseau prive, sans exposition
+publique. La configuration de production reste inchangee.
+
+Pour appliquer des modifications :
+
+```powershell
+pm2 restart ecosystem.dev.config.js --update-env
+```
+
+Verifier que l'API repond avec
+`http://localhost:7001/api/v1/meter/profiles`.
+
 ## 4) Retrouver l'IP du dispositif
 
 Scanner rapide du reseau (`192.168.1.x` par defaut):
