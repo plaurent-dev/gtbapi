@@ -12,6 +12,13 @@ const REGISTER_DEFINITION = [
 ];
 
 const PROFILE_DEFINITIONS = {
+  "stm8-4relay": {
+    defaultUnitId: 1,
+    canWriteRelay: true,
+    fields: Array.from({ length: 4 }, (_, address) => ({
+      name: `relay_${address + 1}`, type: "coil", address, count: 1, decode: "bit"
+    }))
+  },
   "polier-mm80lmzmod": {
     defaultUnitId: 91,
     fields: [
@@ -333,11 +340,17 @@ async function readDeviceProfile({
         readResult = await client.readHoldingRegisters(field.address, field.count);
       } else if (field.type === "input") {
         readResult = await client.readInputRegisters(field.address, field.count);
+      } else if (field.type === "coil") {
+        readResult = await client.readCoils(field.address, field.count);
       } else {
         throw new Error(`Unsupported field type: ${field.type}`);
       }
 
-      output[field.name] = decodeByType(field.decode, readResult.data);
+      if (field.decode === "bit") {
+        const bit = readResult.data[0];
+        if (![true, false, 0, 1].includes(bit)) throw new Error("Etat de relais invalide");
+        output[field.name] = Number(bit);
+      } else output[field.name] = decodeByType(field.decode, readResult.data);
     }
 
     return {
@@ -349,6 +362,30 @@ async function readDeviceProfile({
 }
 
 const changingGateways = new Set();
+
+async function writeRelay({ host, port = config.MODBUS_PORT, unitId, profile, relay, state, commandConfirmed, timeoutMs = config.MODBUS_TIMEOUT_MS }) {
+  if (!host || profile !== "stm8-4relay" || commandConfirmed !== true || typeof state !== "boolean"
+    || !Number.isInteger(relay) || relay < 1 || relay > 4 || !Number.isInteger(unitId) || unitId < 1 || unitId > 247) {
+    throw Object.assign(new Error("Profil STM8 4 relais, canal 1 a 4, etat booleen et confirmation requis."), { statusCode: 400 });
+  }
+  const gateway = `${host}:${port}`;
+  if (changingGateways.has(gateway)) throw Object.assign(new Error("Une commande est deja en cours sur cette passerelle."), { statusCode: 409 });
+  changingGateways.add(gateway);
+  try {
+    return await withClient(host, port, unitId, timeoutMs, async client => {
+      const before = await client.readCoils(relay - 1, 1);
+      if (![true, false, 0, 1].includes(before.data[0])) throw new Error("Lecture prealable du relais invalide : aucune commande envoyee.");
+      try {
+        await client.writeCoil(relay - 1, state);
+        const result = await client.readCoils(relay - 1, 1);
+        if (![true, false, 0, 1].includes(result.data[0]) || Boolean(result.data[0]) !== state) throw new Error("Etat relu different");
+      } catch (error) {
+        throw Object.assign(new Error("Commande non confirmee : le relais peut avoir change d'etat. Relire les etats avant toute nouvelle commande, sans repetition automatique.", { cause: error }), { statusCode: 502 });
+      }
+      return { profile, unitId, relay, state, verified: true };
+    });
+  } finally { changingGateways.delete(gateway); }
+}
 
 async function changeUnitId({ host, port = config.MODBUS_PORT, unitId, newUnitId, profile, setupConfirmed, timeoutMs = config.MODBUS_TIMEOUT_MS }) {
   if (!host || profile !== "eastron-sdm120ct" || setupConfirmed !== true ||
@@ -407,5 +444,6 @@ module.exports = {
   discoverUnitIds,
   readRawRegisters,
   readDeviceProfile,
+  writeRelay,
   changeUnitId
 };

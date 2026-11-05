@@ -2,6 +2,35 @@
 
 API Node.js pour lire un compteur via le convertisseur Waveshare RS485-to-POE-Eth(B) et exposer les mesures en REST.
 
+## Carte STM8 quatre relais
+
+Le profil `stm8-4relay` cible le firmware compatible avec
+[la variante STM8 quatre relais de modbus_relay](https://github.com/eddyem/eddys_snippets/tree/master/modbus_relay).
+Il ne couvre pas automatiquement toutes les cartes STM8/N76E003 : verifier la
+table Modbus du vendeur. La compatibilite de la carte photographiee reste a
+confirmer sur materiel. Aucun registre interne UART/GPIO du microcontroleur
+n'est expose par ce profil.
+
+- Lecture `GET /api/v1/meter/read-profile?host=...&port=4196&unitId=1&profile=stm8-4relay` :
+  FC01, coils 0 a 3, resultat `relay_1` a `relay_4` avec valeurs 0/1.
+- Commande `POST /api/v1/meter/write-relay`, JSON strict :
+  `{"host":"10.107.31.5","port":4196,"unitId":1,"profile":"stm8-4relay","relay":1,"state":true,"commandConfirmed":true}`.
+  `relay` va de 1 a 4, `state` est un booleen. Lecture prealable, puis FC05
+  a l'adresse `relay - 1`, une seule fois, puis relecture FC01.
+  `verified: true` confirme l'etat logique, pas la position physique du contact.
+- Un echec apres tentative d'ecriture donne HTTP 502 : l'etat peut avoir change.
+  Ne pas repeter automatiquement ; relire et verifier avant de recommander.
+  Une autre commande simultanee sur la meme passerelle est refusee (409).
+- Aucune commande globale, broadcast, changement d'adresse ou debit.
+  Configurer la passerelle selon la documentation du firmware (l'utilitaire cite
+  utilise par defaut 9600 bauds, 8N1, adresse 1), sans changement automatique.
+  Le transport reste Modbus TCP via la passerelle existante, pas UART TTL direct.
+
+Cette API Modbus n'authentifie pas ses appels : la garder sur un reseau prive,
+accessible uniquement aux services autorises, jamais exposee publiquement.
+La console Cordon GTB authentifie et reserve ces commandes aux administrateurs.
+Deployer et redemarrer les deux services pour utiliser les controles.
+
 ## 1) Installation
 
 ```bash

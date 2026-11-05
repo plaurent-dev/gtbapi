@@ -9,6 +9,7 @@ const {
   readRawRegisters,
   readDeviceProfile,
   changeUnitId,
+  writeRelay,
   PROFILE_DEFINITIONS
 } = require("./modbus");
 const { discoverMeters } = require("./discovery");
@@ -213,6 +214,7 @@ app.get("/api/v1/meter/profiles", async (req, res) => {
     name,
     defaultUnitId: def.defaultUnitId,
     canChangeUnitId: def.canChangeUnitId === true,
+    ...(def.canWriteRelay === true ? { canWriteRelay: true } : {}),
     gateways: inventory.byProfile ? inventory.byProfile.get(name) : null,
     fields: def.fields.map((field) => ({
       name: field.name,
@@ -278,6 +280,20 @@ app.post("/api/v1/meter/change-unitid", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+app.post("/api/v1/meter/write-relay", async (req, res, next) => {
+  const parsed = z.object({
+    host: z.ipv4(), port: z.number().int().min(1).max(65535).optional(),
+    unitId: z.number().int().min(1).max(247), profile: z.literal("stm8-4relay"),
+    relay: z.number().int().min(1).max(4), state: z.boolean(), commandConfirmed: z.literal(true),
+    timeoutMs: z.number().int().min(100).max(15000).optional()
+  }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Commande de relais invalide", details: zodIssues(parsed.error) });
+  try {
+    const result = await writeRelay(parsed.data);
+    res.json({ target: { host: parsed.data.host, port: parsed.data.port ?? config.MODBUS_PORT, unitId: result.unitId }, ...result });
+  } catch (error) { next(error); }
 });
 
 app.use((err, _req, res, _next) => {
