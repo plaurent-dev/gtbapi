@@ -16,6 +16,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@chirpstack/chirpstack-api": "^4.20.0",
+    "@grpc/grpc-js": "^1.14.5",
     "dotenv": "^18.0.1",
     "express": "^5.2.1",
     "modbus-serial": "^8.0.25",

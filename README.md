@@ -67,6 +67,68 @@ Variables importantes:
 - `MEASUREMENTS_API_KEY` : cle Bearer obligatoire pour l'insertion HTTP de
   mesures (au moins 32 caracteres). Vide par defaut : insertion desactivee.
 
+### Collecte LoRaWAN avec ChirpStack v4
+
+La collecte est **desactivee par defaut**, independante de `MQTT_ENABLED`
+(publication Modbus). Elle synchronise les passerelles et tous les capteurs
+accessibles dans un tenant ChirpStack via l'API gRPC officielle, puis consomme
+les uplinks JSON `application/+/device/+/event/up` de l'integration MQTT
+ChirpStack. Pas de REST optionnel ni de trames Protobuf de statistiques
+passerelle a configurer dans GTBApi.
+
+1. Installer la migration `012_lorawan.sql` du portail et ses droits dans la
+   **meme base PostgreSQL** utilisee par les deux services ; voir le README du
+   portail. Aucune migration ni modification du materiel n'est automatique.
+2. Dans ChirpStack, creer une cle d'API **limitee au tenant concerne** et
+   autorisee a lister passerelles, applications et capteurs. Recuperer l'UUID
+   du tenant. La cle reste uniquement dans l'environnement du serveur GTBApi :
+   ne pas la mettre dans le navigateur, Git ou un ticket.
+3. Renseigner les variables `LORAWAN_*` de `.env.example`, ainsi que `PG*`.
+   `LORAWAN_API_SERVER` est l'adresse gRPC `hote:port`, sans `http://`.
+   `LORAWAN_API_TLS=true` est le choix normal. Si ChirpStack expose uniquement
+   gRPC sans TLS, `false` n'est acceptable que sur une liaison locale ou un
+   reseau prive de confiance : la cle traverse alors le reseau en clair.
+   Utiliser `mqtts://` et un certificat valide pour un broker distant. Les
+   identifiants MQTT se renseignent separement de l'URL.
+4. Donner au compte MQTT le droit de lecture des topics applicatifs utiles.
+   Restreindre les ACL du broker aux applications du tenant : le filtre MQTT
+   couvre tous les IDs visibles par ce compte et GTBApi rejette les messages
+   dont le tenant, l'application ou le DevEUI ne correspondent pas au contenu
+   et au topic. Utiliser un `LORAWAN_MQTT_CLIENT_ID` stable et unique par
+   instance ; deux instances portant le meme ID se deconnectent mutuellement.
+5. Activer `LORAWAN_ENABLED=true`, redemarrer GTBApi et le portail, puis
+   consulter l'etat dans Supervision et les journaux GTBApi. L'endpoint local
+   `GET /api/v1/lorawan/status` expose uniquement l'etat du service, pas les
+   identifiants. Comme les autres routes GTBApi, il doit rester sur un reseau
+   prive ; le portail requiert une session pour le consulter.
+
+Une erreur de configuration ou d'initialisation LoRaWAN est signalee dans
+l'etat et les journaux sans empecher le demarrage de la partie Modbus.
+La synchronisation est paginee, limitee a 10000 equipements par type et
+transactionnelle. Une erreur laisse l'inventaire precedent intact. Un element
+disparu est marque absent, jamais supprime : ses placements et son historique
+restent disponibles. L'etat de passerelle est celui rapporte par ChirpStack
+lors de la derniere synchronisation, pas une preuve de connectivite instantanee.
+La reception et le decodage sont horodates distinctement ; sans heure source,
+l'interface indique explicitement l'heure de reception.
+
+Pour le [Dragino LDS02](https://docs.dragino.com/docs/LoRaWAN-End-Node/door-water-leak-contact-sensors/lds02/),
+le profil nomme exactement `LDS02` ou `Dragino-LDS02` decode la trame FPort 10
+de 10 octets : porte (0 fermee, 1 ouverte), tension de pile, nombre d'ouvertures,
+duree de la derniere ouverture et bit d'alarme. Pour un autre nom de profil,
+indiquer son UUID dans `LORAWAN_LDS02_PROFILE_IDS` (liste separee par des
+virgules). Les autres ports ne creent pas d'etat de porte fictif. Pour les
+autres capteurs, les nombres et booleens de premier niveau de `object`
+(decode par ChirpStack) sont historises sans supposer d'unite ; une trame
+sans decodeur reste archivee mais indiquee comme non decodee.
+
+Les rediffusions du meme `deduplicationId` ne dupliquent pas les mesures.
+L'abonnement demande QoS 1, avec session MQTT persistante, et l'accuse de
+reception suit l'ecriture PostgreSQL pour les publications QoS 1. Toutefois
+la QoS effective ne peut pas depasser celle du **publieur ChirpStack** : si
+celui-ci publie en QoS 0, les trames peuvent etre perdues pendant une panne.
+Aucune garantie d'exactement-une-fois ni de rattrapage universel n'est promise.
+
 ## 3) Demarrage local
 
 ```bash

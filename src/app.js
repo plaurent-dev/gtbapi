@@ -23,6 +23,8 @@ app.disable("x-powered-by");
 app.locals.profileInventoryPool = createProfileInventoryPool(config);
 app.locals.measurementsPool = createMeasurementsPool(config);
 app.locals.measurementsApiKey = config.MEASUREMENTS_API_KEY;
+app.locals.lorawanStatus = { enabled: false, mqttConnected: false, lastSync: null, lastEvent: null,
+  error: null, syncError: null, ingestionError: null };
 
 function zodIssues(error) {
   return error.issues.map((issue) => ({
@@ -48,6 +50,7 @@ app.use(express.json({ limit: "100kb" }));
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
+app.get("/api/v1/lorawan/status", (req, res) => res.json(req.app.locals.lorawanStatus));
 
 const readQuerySchema = z.object({
   host: z.string().optional(),

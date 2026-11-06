@@ -5,6 +5,10 @@ const config = require("./config");
 const logger = require("./logger");
 const { readMeter } = require("./modbus");
 const { publishMeasurements, closePublishers } = require("./publisher");
+const { createRuntime } = require("./lorawan/runtime");
+
+const lorawan = createRuntime(process.env, config, logger);
+app.locals.lorawanStatus = lorawan.status;
 
 const server = app.listen(config.PORT, () => {
   logger.info({ port: config.PORT }, "GTB API listening");
@@ -44,6 +48,7 @@ async function shutdown(signal) {
     }
     try {
       const results = await Promise.allSettled([
+        lorawan.close(),
         app.locals.profileInventoryPool?.end(),
         app.locals.measurementsPool?.end()
       ]);
