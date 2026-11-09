@@ -38,7 +38,7 @@ function parseUplink(topic, payload, tenantId, lds02ProfileIds = [], receivedAt 
   if (bytes.toString("base64") !== event.data) throw new Error("Invalid base64 payload");
   let decoded;
   try {
-    decoded = decodeUplink({ port: event.fPort, bytes, object: event.object,
+    decoded = decodeUplink({ object: event.object,
       profileId: info.deviceProfileId, profileName: info.deviceProfileName }, lds02ProfileIds);
   } catch (error) {
     if (!(error instanceof Error)) throw error;

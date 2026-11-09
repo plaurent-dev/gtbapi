@@ -112,15 +112,31 @@ lors de la derniere synchronisation, pas une preuve de connectivite instantanee.
 La reception et le decodage sont horodates distinctement ; sans heure source,
 l'interface indique explicitement l'heure de reception.
 
+Le decodage des payloads est exclusivement assure par les codecs des profils
+**ChirpStack**, y compris pour le LDS02 : GTBApi ne decode plus les octets bruts
+et n'utilise aucun decodeur local de secours. Les nombres finis et booleens
+de premier niveau de `object` sont historises (booleens convertis en 0/1) ;
+les textes et objets imbriques ne sont pas interpretes comme des mesures.
+Sans mesure exploitable, la trame brute reste archivee avec le statut
+`unsupported` et un avertissement dans les journaux. Une mesure invalide
+classe toute la trame `invalid`, sans enregistrer de mesures partielles.
+
 Pour le [Dragino LDS02](https://docs.dragino.com/docs/LoRaWAN-End-Node/door-water-leak-contact-sensors/lds02/),
-le profil nomme exactement `LDS02` ou `Dragino-LDS02` decode la trame FPort 10
-de 10 octets : porte (0 fermee, 1 ouverte), tension de pile, nombre d'ouvertures,
-duree de la derniere ouverture et bit d'alarme. Pour un autre nom de profil,
-indiquer son UUID dans `LORAWAN_LDS02_PROFILE_IDS` (liste separee par des
-virgules). Les autres ports ne creent pas d'etat de porte fictif. Pour les
-autres capteurs, les nombres et booleens de premier niveau de `object`
-(decode par ChirpStack) sont historises sans supposer d'unite ; une trame
-sans decodeur reste archivee mais indiquee comme non decodee.
+installer le codec JavaScript dans ChirpStack **avant de deployer cette
+version**, avec les champs `door_open` (0 fermee, 1 ouverte, ou booleen),
+`battery_voltage` (nombre positif ou nul, en V), `door_open_count` (entier
+24 bits positif ou nul), `last_open_duration` (meme plage, en minutes) et
+`alarm` (0/1 ou booleen). GTBApi valide les champs presents sans inventer
+ceux qui manquent. Les profils nommes `LDS02` ou `Dragino-LDS02` conservent
+les unites historiques `V` et `min` ; pour un autre nom, indiquer son UUID
+dans `LORAWAN_LDS02_PROFILE_IDS` (liste separee par des virgules).
+Cette variable ne selectionne plus de decodeur de payload. Pour les autres
+capteurs, dont l'AQS01-L, les valeurs numeriques de `object` restent
+historisees sans supposer d'unite.
+
+Aucune migration SQL ni modification du portail n'est necessaire. Redemarrer
+uniquement GTBApi apres la mise a jour et verifier une **nouvelle** trame :
+les anciennes mesures et les evenements deja dedupliques ne sont pas recalcules.
 
 Les rediffusions du meme `deduplicationId` ne dupliquent pas les mesures.
 L'abonnement demande QoS 1, avec session MQTT persistante, et l'accuse de

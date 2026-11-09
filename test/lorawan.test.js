@@ -2,6 +2,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const { parseUplink, storeUplink } = require("../src/lorawan/events");
+const { decodeUplink } = require("../src/lorawan/codec");
 const { parseConfig, createRuntime } = require("../src/lorawan/runtime");
 const { pages, fetchSnapshot, storeSnapshot, createClients } = require("../src/lorawan/inventory");
 const grpc = require("@grpc/grpc-js");
@@ -22,25 +23,26 @@ const topic = `application/${app}/device/${dev}/event/up`;
 const base = {
   deduplicationId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", time: "2026-11-06T08:11:26.716793+00:00",
   deviceInfo: { tenantId: tenant, applicationId: app, deviceProfileId: profile, deviceProfileName: "Dragino-LDS02", devEui: dev },
-  fPort: 10, data: "DH4BAAABAAAAAA==", rxInfo: [{ gatewayId: gateway, rssi: -45, snr: 14.8 }]
+  fPort: 10, data: "DH4BAAABAAAAAA==",
+  object: { door_open: 0, battery_voltage: 3.198, door_open_count: 1, last_open_duration: 0, alarm: 0 },
+  rxInfo: [{ gatewayId: gateway, rssi: -45, snr: 14.8 }]
 };
 const parse = (input = base, selectedTopic = topic) => parseUplink(selectedTopic, Buffer.from(JSON.stringify(input)), tenant);
 
-test("LDS02 payloads captured from the user's sensor decode open and closed without inventing timestamps", () => {
+test("LDS02 measurements come exclusively from ChirpStack object with historical units and source timestamps", () => {
   const closed = parse();
-  const opened = parse({ ...base, data: "jH4BAAABAAAAAA==", deduplicationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+  const opened = parse({ ...base, object: { ...base.object, door_open: 1, battery_voltage: 3.054 },
+    deduplicationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" });
+  assert.equal(opened.status, "decoded");
+  assert.deepEqual(opened.bytes, closed.bytes);
   assert.equal(closed.measurements.find(item => item.name === "door_open").value, 0);
   assert.equal(opened.measurements.find(item => item.name === "door_open").value, 1);
-  assert.equal(closed.measurements.find(item => item.name === "battery_voltage").value, 3.198);
+  assert.deepEqual(opened.measurements.find(item => item.name === "battery_voltage"),
+    { name: "battery_voltage", value: 3.054, unit: "V" });
   assert.equal(opened.measurements.find(item => item.name === "door_open_count").value, 1);
   assert.equal(closed.sourceTime, base.time);
   assert.deepEqual(closed.rxInfo, [{ gatewayId: gateway, rssi: -45, snr: 14.8, gwTime: undefined, nsTime: undefined }]);
-  const timed = Buffer.from(base.data, "base64");
-  timed[0] |= 0x40;
-  timed.writeUIntBE(123, 3, 3);
-  timed.writeUIntBE(37, 6, 3);
-  timed[9] = 1;
-  const alarm = parse({ ...base, data: timed.toString("base64") });
+  const alarm = parse({ ...base, object: { ...base.object, door_open_count: 123, last_open_duration: 37, alarm: true } });
   assert.equal(alarm.measurements.find(item => item.name === "battery_voltage").value, 3.198);
   assert.equal(alarm.measurements.find(item => item.name === "door_open_count").value, 123);
   assert.deepEqual(alarm.measurements.find(item => item.name === "last_open_duration"),
@@ -50,15 +52,72 @@ test("LDS02 payloads captured from the user's sensor decode open and closed with
   assert.equal(parse(withoutTime).sourceTime, null);
 });
 
-test("invalid or unrecognized payloads never produce a fabricated door state", () => {
-  const invalid = parse({ ...base, data: "AA==" });
-  assert.equal(invalid.status, "invalid");
-  assert.deepEqual(invalid.measurements, []);
-  const unknown = parse({ ...base, fPort: 7 });
-  assert.equal(unknown.status, "unsupported");
-  assert.deepEqual(unknown.measurements, []);
+test("missing or nonnumeric ChirpStack objects never fall back to raw LDS02 decoding", () => {
+  for (const object of [undefined, null, {}, { label: "open", nested: { door_open: 1 } }]) {
+    for (const data of [base.data, "jH4BAAABAAAAAA==", "AA=="]) {
+      const missing = parse({ ...base, object, data });
+      assert.equal(missing.status, "unsupported");
+      assert.deepEqual(missing.measurements, []);
+      assert.match(missing.error, /ChirpStack object/);
+    }
+  }
+  const alias = parseUplink(topic, Buffer.from(JSON.stringify({
+    ...base, object: null, deviceInfo: { ...base.deviceInfo, deviceProfileName: "Custom door" }
+  })), tenant, [profile]);
+  assert.equal(alias.status, "unsupported");
+  const upstreamOnly = parse({ ...base, data: "AA==", fPort: 7 });
+  assert.equal(upstreamOnly.status, "decoded");
+  assert.deepEqual(upstreamOnly.measurements, parse().measurements);
+});
+
+test("invalid LDS02 decoded fields reject all measurements instead of fabricating states or recording partial data", () => {
+  for (const [name, value] of [
+    ["door_open", 2], ["door_open", "OUVERT"], ["door_open", null],
+    ["battery_voltage", -1], ["battery_voltage", true], ["battery_voltage", "3.2"],
+    ["door_open_count", -1], ["door_open_count", 1.5], ["door_open_count", 16777216],
+    ["last_open_duration", -1], ["last_open_duration", 16777216], ["alarm", 2]
+  ]) {
+    const invalid = parse({ ...base, object: { ...base.object, [name]: value } });
+    assert.equal(invalid.status, "invalid", name);
+    assert.deepEqual(invalid.measurements, []);
+    assert.match(invalid.error, new RegExp(name));
+  }
+  const states = parse({ ...base, object: { door_open: true, alarm: false } });
+  assert.deepEqual(states.measurements, [
+    { name: "door_open", value: 1, unit: "" }, { name: "alarm", value: 0, unit: "" }
+  ]);
+  const batteryOnly = parse({ ...base, object: { battery_voltage: 3.2 } });
+  assert.deepEqual(batteryOnly.measurements, [{ name: "battery_voltage", value: 3.2, unit: "V" }]);
+  const alias = parseUplink(topic, Buffer.from(JSON.stringify({
+    ...base, deviceInfo: { ...base.deviceInfo, deviceProfileName: "Custom door" }
+  })), tenant, [profile]);
+  assert.deepEqual(alias.measurements, parse().measurements);
+});
+
+test("generic ChirpStack measurements including AQS01-L remain numeric without inferred units", () => {
   const generic = parse({ ...base, deviceInfo: { ...base.deviceInfo, deviceProfileName: "Other" }, object: { temperature: 21.2, active: true, label: "unknown" } });
   assert.deepEqual(generic.measurements, [{ name: "temperature", value: 21.2, unit: "" }, { name: "active", value: 1, unit: "" }]);
+  const object = { battery_voltage: 3.612, temperature_c: 21.58, humidity_percent: 49.5, pressure_hpa: 1003.1, co2_ppm: 1330 };
+  const aqs01 = parse({ ...base, fPort: 2, data: "DhwIbgHvJy8FMhA=", object,
+    deviceInfo: { ...base.deviceInfo, deviceProfileName: "Dragino-AQS01-L" } });
+  assert.equal(aqs01.status, "decoded");
+  assert.deepEqual(aqs01.measurements, Object.entries(object).map(([name, value]) => ({ name, value, unit: "" })));
+});
+
+test("invalid measurement names, non-finite numbers and oversized objects are explicitly rejected", () => {
+  for (const object of [{ "": 1 }, { ["x".repeat(201)]: 1 }, Object.fromEntries(Array.from({ length: 101 }, (_, i) => [`value_${i}`, i]))]) {
+    const invalid = parse({ ...base, object });
+    assert.equal(invalid.status, "invalid");
+    assert.deepEqual(invalid.measurements, []);
+  }
+  for (const value of [NaN, Infinity, -Infinity]) {
+    assert.throws(() => decodeUplink({ object: { temperature: value }, profileName: "Other" }), /Non-finite/);
+  }
+});
+
+test("uplink envelopes still validate JSON, object shape, base64, tenant and topic", () => {
+  assert.throws(() => parse({ ...base, object: [] }), /uplink fields/);
+  assert.throws(() => parseUplink(topic, Buffer.from("{"), tenant), /Invalid MQTT JSON/);
   assert.throws(() => parse(base, topic.replace(dev, "0000000000000000")), /topic or tenant/);
   assert.throws(() => parse({ ...base, deviceInfo: { ...base.deviceInfo, tenantId: app } }), /topic or tenant/);
   assert.throws(() => parse({ ...base, data: "%%%=" }), /uplink fields/);

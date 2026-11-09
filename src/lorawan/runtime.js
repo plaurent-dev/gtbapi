@@ -122,7 +122,7 @@ function createRuntime(env, pgConfig, logger, { connectMqtt = mqtt.connect } = {
       done();
       return;
     }
-    if (event.status === "invalid") logger.warn({ devEui: event.devEui, message: event.error }, "Invalid LoRaWAN payload");
+    if (event.status !== "decoded") logger.warn({ devEui: event.devEui, message: event.error }, "Missing or invalid ChirpStack measurements");
     storeUplink(pool, event).then(inserted => {
       if (inserted) status.lastEvent = new Date().toISOString();
       status.ingestionError = null;
